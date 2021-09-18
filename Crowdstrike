@@ -1,0 +1,60 @@
+#Recipe::crowdstrike.rb
+
+# Pull down installer from S3 for Windows
+  when 'windows'
+    s3_file "#{Chef::Config['file_cache_path']}\\WindowsSensor.exe" do
+      remote_path 'crowdstrike/WindowsSensor.exe'
+      bucket 'anita'
+      action :create
+      owner 'Administrator'
+      group 'Administrators'
+      not_if { ::File.exist?('C:\\Program Files\\CrowdStrike\\CSFalconService.exe') }
+      notifies :run, 'windows_task[cs]', :immediately
+    end
+
+    # Run Falcon Installer for Windows at 3PM EST
+    template 'C:\\Users\\Administrator\\Desktop\\cs.ps1' do
+      source 'cs.ps1.erb'
+      owner 'Administrator'
+      group 'Administrators'
+    end
+
+    windows_task 'cs' do
+      command 'powershell -file C:\Users\Administrator\Desktop\cs.ps1'
+      frequency :once
+      start_time '19:00'
+    end
+  end
+end
+
+# Pull down installer from S3 for Linux
+  when 'rhel', 'amazon'
+    s3_file '/var/tmp/falcon-sensor.amzn1.x86_64.rpm' do
+      remote_path 'crowdstrike/falcon-sensor.amzn1.x86_64.rpm'
+      bucket 'anita'
+      mode '0600'
+      owner 'root'
+      group 'root'
+      action :create
+      not_if { ::File.exist?('/opt/CrowdStrike/falconctl') }
+    end
+
+    # Install Package
+    package 'falcon-sensor-4' do
+      source '/var/tmp/falcon-sensor.amzn1.x86_64.rpm'
+      action :install
+      not_if { ::File.exist?('/etc/init.d/falcon-sensor') }
+    end
+
+    # Run Falcon Installer with checksum
+    execute 'run falcon with checksum' do
+      command "sudo /opt/CrowdStrike/falconctl -s --cid=xyz -f --apd=true --tags=dev,stg,prod"
+    end
+
+    # Restart falcon-sensor service
+    service 'falcon-sensor' do
+      supports start: 'true', stop: 'true'
+      action :start
+    end
+  end
+end
